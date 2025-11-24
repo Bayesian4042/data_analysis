@@ -5,6 +5,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime, timedelta
+import os
+
+# Get the directory of the current script
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Page configuration
 st.set_page_config(
@@ -45,7 +49,7 @@ st.markdown(
 def load_data():
     """Load the aggregated offtake data"""
     df = pd.read_csv(
-        "/Users/abhilasha/Documents/client-projects/data_analysis/aggregated_offtake_data.csv",
+        os.path.join(BASE_DIR, "aggregated_offtake_data.csv"),
         low_memory=False,
     )
     df["Bill Date"] = pd.to_datetime(df["Bill Date"])
@@ -65,18 +69,18 @@ def load_forecast_data():
     try:
         # Load SKU-level forecast summary (Sept 21 - Oct 20, 2025)
         test_summary = pd.read_csv(
-            "/Users/abhilasha/Documents/client-projects/data_analysis/top244_skus_forecast_summary.csv"
+            os.path.join(BASE_DIR, "top244_skus_forecast_summary.csv")
         )
 
         # Load SKU-level forecast details
         forecast_details = pd.read_csv(
-            "/Users/abhilasha/Documents/client-projects/data_analysis/top244_skus_forecast_details.csv"
+            os.path.join(BASE_DIR, "top244_skus_forecast_details.csv")
         )
         forecast_details["Date"] = pd.to_datetime(forecast_details["Date"])
 
         # Load accuracy tables
         accuracy_summary = pd.read_csv(
-            "/Users/abhilasha/Documents/client-projects/data_analysis/sku_accuracy_summary_table.csv"
+            os.path.join(BASE_DIR, "sku_accuracy_summary_table.csv")
         )
 
         return test_summary, forecast_details, accuracy_summary
