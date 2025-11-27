@@ -1178,12 +1178,12 @@ with tab6:
 
         # Download button for filtered data
         csv = display_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Filtered SKU List (CSV)",
-            data=csv,
-            file_name=f"sku_stability_{selected_stability.replace(' ', '_')}.csv",
-            mime="text/csv",
-        )
+        # st.download_button(
+        #     label="📥 Download Filtered SKU List (CSV)",
+        #     data=csv,
+        #     file_name=f"sku_stability_{selected_stability.replace(' ', '_')}.csv",
+        #     mime="text/csv",
+        # )
 
         st.markdown("---")
         st.markdown("---")
