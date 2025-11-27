@@ -362,6 +362,29 @@ with tab1:
     fig.update_layout(height=350)
     st.plotly_chart(fig, use_container_width=True)
 
+    # Monthly trend
+    st.subheader("Monthly Sales Trend")
+    df_filtered_monthly = df_filtered.copy()
+    df_filtered_monthly["Month_Year"] = (
+        df_filtered_monthly["Bill Date"].dt.to_period("M").apply(lambda r: r.start_time)
+    )
+    monthly_sales = df_filtered_monthly.groupby("Month_Year")["Qty"].sum().reset_index()
+    monthly_sales["Month_Name"] = monthly_sales["Month_Year"].dt.strftime("%B %Y")
+
+    fig = px.line(
+        monthly_sales,
+        x="Month_Year",
+        y="Qty",
+        title="Monthly Sales Trend",
+        labels={"Qty": "Total Quantity", "Month_Year": "Month"},
+        markers=True,
+    )
+    fig.update_traces(line_color="#9b59b6", line_width=3, marker_size=8)
+    fig.update_layout(
+        height=400, hovermode="x unified", xaxis_title="Month", yaxis_title="Quantity"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
 
 # TAB 2: PRODUCT ANALYSIS
 with tab2:
