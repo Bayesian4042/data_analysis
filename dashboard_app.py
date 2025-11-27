@@ -89,10 +89,33 @@ def load_forecast_data():
         return None, None, None
 
 
+@st.cache_data
+def load_sku_analysis_data():
+    """Load SKU analysis data (daily, weekly, monthly)"""
+    try:
+        # Load daily data with category info
+        df_daily = pd.read_csv(
+            os.path.join(BASE_DIR, "sku_analysis/df_with_category.csv")
+        )
+        df_daily["Bill Date"] = pd.to_datetime(df_daily["Bill Date"])
+
+        # Load weekly data
+        df_weekly = pd.read_csv(os.path.join(BASE_DIR, "sku_analysis/df_weekly.csv"))
+
+        # Load monthly data
+        df_monthly = pd.read_csv(os.path.join(BASE_DIR, "sku_analysis/df_monthly.csv"))
+
+        return df_daily, df_weekly, df_monthly
+    except Exception as e:
+        st.error(f"Error loading SKU analysis data: {str(e)}")
+        return None, None, None
+
+
 # Load data
 with st.spinner("Loading data..."):
     df = load_data()
     test_summary, forecast_details, accuracy_summary = load_forecast_data()
+    df_daily, df_weekly, df_monthly = load_sku_analysis_data()
 
 # Sidebar filters
 st.sidebar.markdown("## Sales Forecasting Dashboard")
@@ -196,13 +219,14 @@ st.markdown(
 )
 
 # Create tabs for different views
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "Overview",
         "Product Analysis",
         "Store Performance",
         "Time Series",
         "Forecasts",
+        "SKU/Basepack Analysis",
     ]
 )
 
@@ -964,6 +988,555 @@ with tab5:
     else:
         st.warning(
             "Forecast data not available. Please ensure forecast files are generated."
+        )
+
+
+# TAB 6: SKU/BASEPACK ANALYSIS
+with tab6:
+    st.header("SKU/Basepack Analysis")
+
+    if df_daily is not None and df_weekly is not None and df_monthly is not None:
+
+        # Add high-level stability analysis section
+        st.subheader("SKU Stability Overview")
+
+        # Get unique SKU-level data with stability metrics
+        sku_stability = df_daily[
+            [
+                "SKU Code",
+                "Product Name",
+                "Brand",
+                "Category",
+                "months_with_sales",
+                "category",
+            ]
+        ].drop_duplicates(subset=["SKU Code"])
+
+        # Overall metrics
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            total_skus = sku_stability["SKU Code"].nunique()
+            st.metric("Total SKUs", f"{total_skus:,}")
+
+        with col2:
+            avg_months = sku_stability["months_with_sales"].mean()
+            st.metric("Avg Months Active", f"{avg_months:.1f}")
+
+        with col3:
+            consistent_skus = len(
+                sku_stability[sku_stability["months_with_sales"] >= 6]
+            )
+            st.metric("Consistent SKUs (≥6 months)", f"{consistent_skus:,}")
+
+        with col4:
+            pct_consistent = (
+                (consistent_skus / total_skus * 100) if total_skus > 0 else 0
+            )
+            st.metric("% Consistent", f"{pct_consistent:.1f}%")
+
+        st.markdown("---")
+
+        # Two column layout for visualizations
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # Distribution by stability category
+            category_counts = sku_stability["category"].value_counts().reset_index()
+            category_counts.columns = ["Stability Category", "SKU Count"]
+
+            fig = px.bar(
+                category_counts,
+                x="SKU Count",
+                y="Stability Category",
+                orientation="h",
+                title="SKU Distribution by Stability Category",
+                color="SKU Count",
+                color_continuous_scale="Blues",
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            # Distribution by months with sales
+            months_counts = (
+                sku_stability["months_with_sales"]
+                .value_counts()
+                .sort_index()
+                .reset_index()
+            )
+            months_counts.columns = ["Months Active", "SKU Count"]
+
+            fig = px.bar(
+                months_counts,
+                x="Months Active",
+                y="SKU Count",
+                title="SKU Distribution by Months Active",
+                color="SKU Count",
+                color_continuous_scale="Greens",
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Detailed breakdown section
+        st.subheader("🔍 Detailed SKU Breakdown by Stability")
+
+        # Filter by stability category
+        selected_stability = st.selectbox(
+            "Select Stability Category:",
+            options=["All Categories"]
+            + sorted(sku_stability["category"].unique().tolist()),
+        )
+
+        if selected_stability == "All Categories":
+            filtered_stability = sku_stability.copy()
+        else:
+            filtered_stability = sku_stability[
+                sku_stability["category"] == selected_stability
+            ].copy()
+
+        # Additional filters
+        col1, col2 = st.columns(2)
+
+        with col1:
+            min_months = st.slider(
+                "Minimum Months Active:",
+                min_value=int(sku_stability["months_with_sales"].min()),
+                max_value=int(sku_stability["months_with_sales"].max()),
+                value=int(sku_stability["months_with_sales"].min()),
+            )
+
+        with col2:
+            selected_category_filter = st.multiselect(
+                "Filter by Product Category:",
+                options=sorted(sku_stability["Category"].unique().tolist()),
+                default=[],
+            )
+
+        # Apply filters
+        filtered_stability = filtered_stability[
+            filtered_stability["months_with_sales"] >= min_months
+        ]
+
+        if len(selected_category_filter) > 0:
+            filtered_stability = filtered_stability[
+                filtered_stability["Category"].isin(selected_category_filter)
+            ]
+
+        # Show metrics for filtered data
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric("Filtered SKU Count", f"{len(filtered_stability):,}")
+
+        with col2:
+            avg_months_filtered = (
+                filtered_stability["months_with_sales"].mean()
+                if len(filtered_stability) > 0
+                else 0
+            )
+            st.metric("Avg Months Active", f"{avg_months_filtered:.1f}")
+
+        with col3:
+            if len(filtered_stability) > 0:
+                most_common_cat = (
+                    filtered_stability["category"].mode()[0]
+                    if len(filtered_stability["category"].mode()) > 0
+                    else "N/A"
+                )
+                st.metric("Most Common Category", most_common_cat)
+
+        # Display the filtered SKU table
+        st.subheader("SKU Details")
+
+        display_columns = [
+            "SKU Code",
+            "Product Name",
+            "Brand",
+            "Category",
+            "months_with_sales",
+            "category",
+        ]
+        display_df = filtered_stability[display_columns].copy()
+        display_df.columns = [
+            "SKU Code",
+            "Product Name",
+            "Brand",
+            "Product Category",
+            "Months Active",
+            "Stability Category",
+        ]
+        display_df = display_df.sort_values("Months Active", ascending=False)
+
+        st.dataframe(
+            display_df.style.format(
+                {"SKU Code": "{:,.0f}", "Months Active": "{:,.0f}"}
+            ).background_gradient(subset=["Months Active"], cmap="RdYlGn"),
+            use_container_width=True,
+            height=400,
+        )
+
+        # Download button for filtered data
+        csv = display_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Filtered SKU List (CSV)",
+            data=csv,
+            file_name=f"sku_stability_{selected_stability.replace(' ', '_')}.csv",
+            mime="text/csv",
+        )
+
+        st.markdown("---")
+        st.markdown("---")
+
+        # Original individual SKU analysis section
+        st.header("Individual SKU/Basepack Analysis")
+        # Create basepack to SKU mapping
+        basepack_sku_mapping = df_daily[
+            [
+                "Basepack Code",
+                "Basepack Desc",
+                "SKU Code",
+                "Product Name",
+                "Brand",
+                "Category",
+            ]
+        ].drop_duplicates()
+
+        # Selection method
+        col1, col2 = st.columns([1, 3])
+
+        with col1:
+            selection_method = st.radio(
+                "Select by:",
+                options=["Basepack Code", "SKU Code"],
+                help="Choose whether to search by Basepack Code or SKU Code",
+            )
+
+        with col2:
+            if selection_method == "Basepack Code":
+                # Get unique basepacks
+                basepack_options = basepack_sku_mapping[
+                    ["Basepack Code", "Basepack Desc"]
+                ].drop_duplicates()
+                basepack_options["Basepack Code"] = pd.to_numeric(
+                    basepack_options["Basepack Code"], errors="coerce"
+                )
+                basepack_options = basepack_options.dropna(subset=["Basepack Code"])
+                basepack_options["Basepack Code"] = basepack_options[
+                    "Basepack Code"
+                ].astype(int)
+                basepack_options["Display"] = (
+                    basepack_options["Basepack Code"].astype(str)
+                    + " - "
+                    + basepack_options["Basepack Desc"].str[:60]
+                )
+                basepack_options = basepack_options.sort_values("Basepack Code")
+
+                selected_display = st.selectbox(
+                    "Select Basepack Code:",
+                    options=basepack_options["Display"].tolist(),
+                )
+
+                selected_code = int(selected_display.split(" - ")[0])
+                selected_sku = basepack_sku_mapping[
+                    basepack_sku_mapping["Basepack Code"] == selected_code
+                ]["SKU Code"].iloc[0]
+                selected_info = basepack_sku_mapping[
+                    basepack_sku_mapping["Basepack Code"] == selected_code
+                ].iloc[0]
+
+            else:  # SKU Code
+                # Get unique SKUs
+                sku_options = basepack_sku_mapping[
+                    ["SKU Code", "Product Name", "Basepack Code"]
+                ].drop_duplicates()
+                sku_options["SKU Code"] = pd.to_numeric(
+                    sku_options["SKU Code"], errors="coerce"
+                )
+                sku_options = sku_options.dropna(subset=["SKU Code"])
+                sku_options["SKU Code"] = sku_options["SKU Code"].astype(int)
+                sku_options["Display"] = (
+                    sku_options["SKU Code"].astype(str)
+                    + " - "
+                    + sku_options["Product Name"].str[:60]
+                )
+                sku_options = sku_options.sort_values("SKU Code")
+
+                selected_display = st.selectbox(
+                    "Select SKU Code:",
+                    options=sku_options["Display"].tolist(),
+                )
+
+                selected_sku = int(selected_display.split(" - ")[0])
+                selected_info = basepack_sku_mapping[
+                    basepack_sku_mapping["SKU Code"] == selected_sku
+                ].iloc[0]
+                selected_code = selected_info["Basepack Code"]
+
+        # Display product information
+        st.markdown("---")
+        st.subheader("Product Information")
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("SKU Code", f"{selected_sku}")
+        with col2:
+            st.metric("Basepack Code", f"{selected_code}")
+        with col3:
+            st.metric("Brand", f"{selected_info['Brand']}")
+        with col4:
+            st.metric("Category", f"{selected_info['Category']}")
+
+        st.markdown(f"**Product Name:** {selected_info['Product Name']}")
+        st.markdown(f"**Basepack Description:** {selected_info['Basepack Desc']}")
+
+        st.markdown("---")
+
+        # Time granularity selection
+        analysis_type = st.radio(
+            "Select Time Granularity:",
+            options=["All", "Daily", "Weekly", "Monthly"],
+            horizontal=True,
+        )
+
+        # Filter data for selected SKU
+        daily_data = df_daily[df_daily["SKU Code"] == selected_sku].copy()
+        weekly_data = df_weekly[df_weekly["SKU Code"] == selected_sku].copy()
+        monthly_data = df_monthly[df_monthly["SKU Code"] == selected_sku].copy()
+
+        if analysis_type == "All":
+            # Show all three views
+            st.subheader("Daily Analysis")
+            if len(daily_data) > 0:
+                daily_agg = daily_data.groupby("Bill Date")["Qty"].sum().reset_index()
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Qty (Daily)", f"{daily_agg['Qty'].sum():,.0f}")
+                with col2:
+                    st.metric("Avg Daily Qty", f"{daily_agg['Qty'].mean():.2f}")
+                with col3:
+                    st.metric("Days with Sales", f"{len(daily_agg)}")
+
+                fig = px.line(
+                    daily_agg,
+                    x="Bill Date",
+                    y="Qty",
+                    title=f'Daily Quantity Trend - {selected_info["Product Name"][:50]}',
+                    labels={"Qty": "Quantity", "Bill Date": "Date"},
+                    markers=True,
+                )
+                fig.update_traces(line_color="#3498db", line_width=2, marker_size=5)
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No daily data available for this SKU")
+
+            st.markdown("---")
+            st.subheader("Weekly Analysis")
+            if len(weekly_data) > 0:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Qty (Weekly)", f"{weekly_data['Qty'].sum():,.0f}")
+                with col2:
+                    st.metric("Avg Weekly Qty", f"{weekly_data['Qty'].mean():.2f}")
+                with col3:
+                    st.metric("Weeks with Sales", f"{len(weekly_data)}")
+
+                fig = px.line(
+                    weekly_data,
+                    x="Week",
+                    y="Qty",
+                    title=f'Weekly Quantity Trend - {selected_info["Product Name"][:50]}',
+                    labels={"Qty": "Quantity", "Week": "Week Number"},
+                    markers=True,
+                )
+                fig.update_traces(line_color="#2ecc71", line_width=2, marker_size=6)
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No weekly data available for this SKU")
+
+            st.markdown("---")
+            st.subheader("Monthly Analysis")
+            if len(monthly_data) > 0:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        "Total Qty (Monthly)", f"{monthly_data['Qty'].sum():,.0f}"
+                    )
+                with col2:
+                    st.metric("Avg Monthly Qty", f"{monthly_data['Qty'].mean():.2f}")
+                with col3:
+                    st.metric("Months with Sales", f"{len(monthly_data)}")
+
+                # Add month names for better readability
+                monthly_data["Month_Name"] = pd.to_datetime(
+                    monthly_data["Month"], format="%m"
+                ).dt.strftime("%B")
+
+                fig = px.line(
+                    monthly_data,
+                    x="Month_Name",
+                    y="Qty",
+                    title=f'Monthly Quantity Trend - {selected_info["Product Name"][:50]}',
+                    labels={"Qty": "Quantity", "Month_Name": "Month"},
+                    markers=True,
+                )
+                fig.update_traces(line_color="#e74c3c", line_width=2, marker_size=6)
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No monthly data available for this SKU")
+
+        elif analysis_type == "Daily":
+            st.subheader("Daily Analysis")
+            if len(daily_data) > 0:
+                daily_agg = daily_data.groupby("Bill Date")["Qty"].sum().reset_index()
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Qty", f"{daily_agg['Qty'].sum():,.0f}")
+                with col2:
+                    st.metric("Avg Daily Qty", f"{daily_agg['Qty'].mean():.2f}")
+                with col3:
+                    st.metric("Max Daily Qty", f"{daily_agg['Qty'].max():,.0f}")
+                with col4:
+                    st.metric("Days with Sales", f"{len(daily_agg)}")
+
+                fig = px.line(
+                    daily_agg,
+                    x="Bill Date",
+                    y="Qty",
+                    title=f'Daily Quantity Trend - {selected_info["Product Name"][:50]}',
+                    labels={"Qty": "Quantity", "Bill Date": "Date"},
+                    markers=True,
+                )
+                fig.update_traces(line_color="#3498db", line_width=2, marker_size=6)
+                fig.update_layout(height=500, hovermode="x unified")
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Show store-wise daily analysis
+                st.subheader("Store-wise Daily Sales")
+                store_daily = (
+                    daily_data.groupby(["Store Name", "Bill Date"])["Qty"]
+                    .sum()
+                    .reset_index()
+                )
+                top_stores = (
+                    daily_data.groupby("Store Name")["Qty"]
+                    .sum()
+                    .nlargest(5)
+                    .index.tolist()
+                )
+                store_daily_top = store_daily[
+                    store_daily["Store Name"].isin(top_stores)
+                ]
+
+                fig = px.line(
+                    store_daily_top,
+                    x="Bill Date",
+                    y="Qty",
+                    color="Store Name",
+                    title="Daily Sales by Top 5 Stores",
+                    labels={"Qty": "Quantity", "Bill Date": "Date"},
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No daily data available for this SKU")
+
+        elif analysis_type == "Weekly":
+            st.subheader("Weekly Analysis")
+            if len(weekly_data) > 0:
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Qty", f"{weekly_data['Qty'].sum():,.0f}")
+                with col2:
+                    st.metric("Avg Weekly Qty", f"{weekly_data['Qty'].mean():.2f}")
+                with col3:
+                    st.metric("Max Weekly Qty", f"{weekly_data['Qty'].max():,.0f}")
+                with col4:
+                    st.metric("Weeks with Sales", f"{len(weekly_data)}")
+
+                fig = px.line(
+                    weekly_data,
+                    x="Week",
+                    y="Qty",
+                    title=f'Weekly Quantity Trend - {selected_info["Product Name"][:50]}',
+                    labels={"Qty": "Quantity", "Week": "Week Number"},
+                    markers=True,
+                )
+                fig.update_traces(line_color="#2ecc71", line_width=2, marker_size=6)
+                fig.update_layout(height=500, hovermode="x unified")
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Statistical summary
+                st.subheader("Weekly Statistics")
+                stats_df = pd.DataFrame(
+                    {
+                        "Metric": ["Mean", "Median", "Std Dev", "Min", "Max", "Total"],
+                        "Value": [
+                            f"{weekly_data['Qty'].mean():.2f}",
+                            f"{weekly_data['Qty'].median():.2f}",
+                            f"{weekly_data['Qty'].std():.2f}",
+                            f"{weekly_data['Qty'].min():.0f}",
+                            f"{weekly_data['Qty'].max():.0f}",
+                            f"{weekly_data['Qty'].sum():.0f}",
+                        ],
+                    }
+                )
+                st.dataframe(stats_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No weekly data available for this SKU")
+
+        elif analysis_type == "Monthly":
+            st.subheader("Monthly Analysis")
+            if len(monthly_data) > 0:
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Qty", f"{monthly_data['Qty'].sum():,.0f}")
+                with col2:
+                    st.metric("Avg Monthly Qty", f"{monthly_data['Qty'].mean():.2f}")
+                with col3:
+                    st.metric("Max Monthly Qty", f"{monthly_data['Qty'].max():,.0f}")
+                with col4:
+                    st.metric("Months with Sales", f"{len(monthly_data)}")
+
+                # Add month names for better readability
+                monthly_data["Month_Name"] = pd.to_datetime(
+                    monthly_data["Month"], format="%m"
+                ).dt.strftime("%B")
+
+                fig = px.line(
+                    monthly_data,
+                    x="Month_Name",
+                    y="Qty",
+                    title=f'Monthly Quantity Trend - {selected_info["Product Name"][:50]}',
+                    labels={"Qty": "Quantity", "Month_Name": "Month"},
+                    markers=True,
+                )
+                fig.update_traces(line_color="#e74c3c", line_width=2, marker_size=6)
+                fig.update_layout(height=500, hovermode="x unified")
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Show data table
+                st.subheader("Monthly Data Table")
+                monthly_display = monthly_data[["Month_Name", "Qty"]].copy()
+                monthly_display.columns = ["Month", "Quantity"]
+                st.dataframe(
+                    monthly_display.style.format(
+                        {"Quantity": "{:,.0f}"}
+                    ).background_gradient(subset=["Quantity"], cmap="Blues"),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("No monthly data available for this SKU")
+
+    else:
+        st.warning(
+            "SKU analysis data not available. Please ensure the data files are in the sku_analysis folder."
         )
 
 
